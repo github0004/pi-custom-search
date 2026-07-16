@@ -1,0 +1,57 @@
+{
+  "name": "pi-custom-search",
+  "version": "0.1.0",
+  "description": "Pi extension: multi-backend web_search (brave/serper/tavily/exa/linkup) + local CloakBrowser web_read. No Exa/Jina readers.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "web-search",
+    "web-read",
+    "cloakbrowser",
+    "rrf"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "src",
+    "search.json.example",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "cloakbrowser install"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "cloakbrowser": "^0.4.11",
+    "impit": "^0.14.1",
+    "linkedom": "^0.18.12",
+    "playwright-core": "^1.60.0",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2",
+    "typebox": "^1.1.24",
+    "undici": "^8.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/turndown": "^5.0.6",
+    "typescript": "^5.8.0"
+  }
+}

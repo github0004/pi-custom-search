@@ -1,0 +1,26 @@
+{
+  "defaultBackend": "auto",
+  "combine": false,
+  "combineMode": "rotate",
+  "compact": false,
+  "showStatus": true,
+  "numResults": 10,
+
+  "read": {
+    "defaultMode": "auto",
+    "defaultFormat": "markdown",
+    "onlyMainContent": true,
+    "removeImages": false,
+    "maxChars": 0,
+    "timeoutSeconds": 30,
+    "headless": true
+  },
+
+  "backends": {
+    "brave":  { "enabled": true, "apiKey": "paste-brave-key-here" },
+    "serper": { "enabled": true, "apiKey": "paste-serper-key-here" },
+    "tavily": { "enabled": true, "apiKey": "paste-tavily-key-here" },
+    "exa":    { "enabled": true, "apiKey": "paste-exa-key-here" },
+    "linkup": { "enabled": true, "apiKey": "paste-linkup-key-here", "depth": "standard" }
+  }
+}

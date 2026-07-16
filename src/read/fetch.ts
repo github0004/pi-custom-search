@@ -1,0 +1,71 @@
+/** Fast HTTP fetch via undici + SSRF guard. */
+
+import { fetch } from "undici";
+import { validateUrl, timeoutSignal } from "../utils.js";
+
+export interface FetchResult {
+	url: string;
+	finalUrl: string;
+	status: number;
+	contentType: string;
+	html: string;
+	bytes: number;
+	truncated?: boolean;
+}
+
+/** Real browser UA — community sites often serve different shells to bot UAs. */
+export const DEFAULT_UA =
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
+/** Floor so models passing tiny maxBytes (e.g. 200_000) don't fail on normal pages. */
+export const MIN_MAX_BYTES = 2 * 1024 * 1024;
+
+export function resolveMaxBytes(requested?: number): number {
+	if (requested === undefined || requested <= 0) return DEFAULT_MAX_BYTES;
+	return Math.max(requested, MIN_MAX_BYTES);
+}
+
+export async function fetchUrl(
+	url: string,
+	options: {
+		signal?: AbortSignal;
+		timeoutMs?: number;
+		maxBytes?: number;
+		headers?: Record<string, string>;
+	} = {},
+): Promise<FetchResult> {
+	const ssrf = validateUrl(url);
+	if (ssrf) throw new Error(ssrf);
+
+	const maxBytes = resolveMaxBytes(options.maxBytes);
+	const signal = timeoutSignal(options.signal, options.timeoutMs);
+
+	const response = await fetch(url, {
+		method: "GET",
+		headers: {
+			"user-agent": DEFAULT_UA,
+			accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+			"accept-language": "en-US,en;q=0.9",
+			...options.headers,
+		},
+		redirect: "follow",
+		signal,
+	});
+
+	const contentType = response.headers.get("content-type") ?? "text/html";
+	const ab = await response.arrayBuffer();
+	const truncated = ab.byteLength > maxBytes;
+	const slice = truncated ? ab.slice(0, maxBytes) : ab;
+	const html = Buffer.from(slice).toString("utf-8");
+
+	return {
+		url,
+		finalUrl: response.url || url,
+		status: response.status,
+		contentType,
+		html,
+		bytes: ab.byteLength,
+		truncated,
+	};
+}
