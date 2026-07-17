@@ -29,6 +29,10 @@ export async function fingerprintFetch(
 		signal,
 	});
 
+	const finalUrl = response.url || url;
+	const finalSsrf = validateUrl(finalUrl);
+	if (finalSsrf) throw new Error(finalSsrf);
+
 	const contentType = response.headers.get("content-type") ?? "text/html";
 	const ab = await response.arrayBuffer();
 	const truncated = ab.byteLength > maxBytes;
@@ -37,7 +41,7 @@ export async function fingerprintFetch(
 
 	return {
 		url,
-		finalUrl: response.url || url,
+		finalUrl,
 		status: response.status,
 		contentType,
 		html,

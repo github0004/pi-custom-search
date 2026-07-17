@@ -1,6 +1,6 @@
 /** Backend registry and dispatcher. */
 
-import type { BackendRunner, BackendConfig, SearchResult } from "../../types.js";
+import type { BackendName, BackendRunner, BackendConfig, SearchResult } from "../../types.js";
 import { MISSING_KEY_HELP, waitForCooldown, markCooldown } from "../../utils.js";
 import { resolveBackendKey } from "../../credentials.js";
 import { config } from "../../config.js";
@@ -11,9 +11,8 @@ import { searchTavily } from "./tavily.js";
 import { searchExa } from "./exa.js";
 import { searchLinkup } from "./linkup.js";
 
-export const BACKEND_DEFS: Record<string, BackendRunner> = {
+export const BACKEND_DEFS: Record<BackendName, BackendRunner> = {
 	brave: {
-		needsKey: true,
 		label: "Brave",
 		search: async (query, numResults, { key, signal, backendConfig }) => {
 			const result = await searchBrave(
@@ -27,7 +26,6 @@ export const BACKEND_DEFS: Record<string, BackendRunner> = {
 		},
 	},
 	serper: {
-		needsKey: true,
 		label: "Serper",
 		search: async (query, numResults, { key, signal, backendConfig }) => {
 			const result = await searchSerper(
@@ -41,7 +39,6 @@ export const BACKEND_DEFS: Record<string, BackendRunner> = {
 		},
 	},
 	tavily: {
-		needsKey: true,
 		label: "Tavily",
 		search: async (query, numResults, { key, signal, backendConfig }) => {
 			const result = await searchTavily(
@@ -55,7 +52,6 @@ export const BACKEND_DEFS: Record<string, BackendRunner> = {
 		},
 	},
 	exa: {
-		needsKey: true,
 		label: "Exa",
 		search: async (query, numResults, { key, signal, backendConfig }) => {
 			const result = await searchExa(query, numResults, key!, signal, backendConfig?.timeout);
@@ -63,7 +59,6 @@ export const BACKEND_DEFS: Record<string, BackendRunner> = {
 		},
 	},
 	linkup: {
-		needsKey: true,
 		label: "Linkup",
 		search: async (query, numResults, { key, signal, backendConfig }) => {
 			const result = await searchLinkup(
@@ -85,16 +80,13 @@ export async function runBackend(
 	numResults: number,
 	signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-	await waitForCooldown(backend);
-	const def = BACKEND_DEFS[backend];
+	await waitForCooldown(backend, signal);
+	const def = BACKEND_DEFS[backend as BackendName];
 	if (!def) throw new Error(`Unknown backend: ${backend}`);
 
-	let key: string | undefined;
-	if (def.needsKey) {
-		key = resolveBackendKey(backend, config);
-		if (!key) {
-			throw new Error(`${def.label} backend not configured. ${MISSING_KEY_HELP}`);
-		}
+	const key = resolveBackendKey(backend, config);
+	if (!key) {
+		throw new Error(`${def.label} backend not configured. ${MISSING_KEY_HELP}`);
 	}
 
 	const bc = (config.backends as Record<string, BackendConfig> | undefined)?.[backend];

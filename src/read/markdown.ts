@@ -72,7 +72,7 @@ function stripLargeElements(html: string): string {
 }
 
 export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): string {
-	const service = options.removeImages === false ? keepImagesService : removeImagesService;
+	const service = options.removeImages ? removeImagesService : keepImagesService;
 	return normalizeWhitespace(service.turndown(stripLargeElements(html)));
 }
 

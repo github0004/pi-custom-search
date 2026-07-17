@@ -15,12 +15,33 @@ export function getAgentDir(): string {
 
 const backendCooldowns = new Map<string, number>();
 
-export function waitForCooldown(backend: string): Promise<void> {
+export function waitForCooldown(backend: string, signal?: AbortSignal): Promise<void> {
 	const until = backendCooldowns.get(backend);
 	if (!until) return Promise.resolve();
 	const delay = until - Date.now();
 	if (delay <= 0) return Promise.resolve();
-	return new Promise((r) => setTimeout(r, delay));
+	if (signal?.aborted) {
+		return Promise.reject(
+			signal.reason instanceof Error
+				? signal.reason
+				: new DOMException("Aborted", "AbortError"),
+		);
+	}
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, delay);
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(
+				signal?.reason instanceof Error
+					? signal.reason
+					: new DOMException("Aborted", "AbortError"),
+			);
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
 }
 
 export function markCooldown(backend: string): void {
@@ -38,30 +59,43 @@ export function timeoutSignal(signal?: AbortSignal, timeoutMs?: number): AbortSi
 	return AbortSignal.any([signal, AbortSignal.timeout(effectiveTimeout)]);
 }
 
+function isPrivateIpv4(parts: number[]): boolean {
+	if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
+		return false;
+	}
+	if (parts[0] === 127) return true;
+	if (parts[0] === 10) return true;
+	if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+	if (parts[0] === 192 && parts[1] === 168) return true;
+	if (parts[0] === 169 && parts[1] === 254) return true;
+	if (parts.every((p) => p === 0)) return true;
+	return false;
+}
+
 export function isPrivateHost(host: string): boolean {
-	const lower = host.toLowerCase();
+	const lower = host.toLowerCase().replace(/^\[|\]$/g, "");
 
-	if (lower === "localhost" || lower === "localhost.localdomain") return true;
-	if (lower === "127.0.0.1" || lower === "::1" || lower === "0.0.0.0") return true;
+	if (lower === "localhost" || lower === "localhost.localdomain" || lower.endsWith(".local")) {
+		return true;
+	}
+	if (lower === "127.0.0.1" || lower === "::1" || lower === "0.0.0.0" || lower === "::") {
+		return true;
+	}
 
-	try {
-		let ip = host;
-		if (ip.startsWith("::ffff:")) {
-			ip = ip.slice(7);
-		}
+	let ip = lower;
+	if (ip.startsWith("::ffff:")) {
+		ip = ip.slice(7);
+	}
 
-		if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
-			const parts = ip.split(".").map(Number);
+	if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+		return isPrivateIpv4(ip.split(".").map(Number));
+	}
 
-			if (parts[0] === 127) return true;
-			if (parts[0] === 10) return true;
-			if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-			if (parts[0] === 192 && parts[1] === 168) return true;
-			if (parts[0] === 169 && parts[1] === 254) return true;
-			if (parts.every((p) => p === 0)) return true;
-		}
-	} catch {
-		// ignore
+	// IPv6 ULA fc00::/7 and link-local fe80::/10
+	if (ip.includes(":")) {
+		if (ip === "::1") return true;
+		if (ip.startsWith("fc") || ip.startsWith("fd")) return true;
+		if (/^fe[89ab]/i.test(ip)) return true;
 	}
 
 	return false;
@@ -85,7 +119,7 @@ export function validateUrl(url: string): string | null {
 		}
 
 		const port = parsed.port ? parseInt(parsed.port, 10) : 0;
-		if (port > 0 && port < 1024 && ![80, 443, 8080, 8443].includes(port)) {
+		if (port > 0 && port < 1024 && port !== 80 && port !== 443) {
 			return `SSRF blocked: privileged port ${port} not allowed`;
 		}
 

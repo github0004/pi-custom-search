@@ -9,12 +9,6 @@ export interface BrowserRenderResult {
 	html: string;
 }
 
-let openBrowsers = 0;
-
-export function getOpenBrowserCount(): number {
-	return openBrowsers;
-}
-
 type CloakPage = {
 	goto: (
 		u: string,
@@ -59,7 +53,6 @@ async function settleAndDismissOverlays(page: CloakPage): Promise<void> {
 					}
 				});
 			}
-			// Hide leftover overlays that steal Readability's attention
 			document
 				.querySelectorAll(
 					"[class*='modal'],[class*='overlay'],[id*='onetrust'],[class*='signup'],[class*='join-community']",
@@ -91,10 +84,14 @@ export async function renderWithCloakBrowser(
 	const timeout = options.timeoutMs ?? 30_000;
 	const cloak = await import("cloakbrowser");
 
-	openBrowsers++;
 	let browser: CloakBrowser | undefined;
+	const onAbort = () => {
+		void browser?.close().catch(() => {});
+	};
+	signal.addEventListener("abort", onAbort, { once: true });
+
 	try {
-		if (signal.aborted) throw new Error("Aborted");
+		if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 
 		browser = (await cloak.launch({ headless })) as unknown as CloakBrowser;
 		const context = await browser.newContext();
@@ -104,12 +101,20 @@ export async function renderWithCloakBrowser(
 			try {
 				response = await page.goto(url, { waitUntil: "load", timeout });
 			} catch {
+				if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 				response = await page.goto(url, { waitUntil: "domcontentloaded", timeout });
 			}
+			if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
 			await settleAndDismissOverlays(page);
+
+			const finalUrl = page.url();
+			const finalSsrf = validateUrl(finalUrl);
+			if (finalSsrf) throw new Error(finalSsrf);
 
 			let html = "";
 			for (let attempt = 0; attempt < 4; attempt++) {
+				if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 				try {
 					html = await page.content();
 					break;
@@ -118,14 +123,13 @@ export async function renderWithCloakBrowser(
 				}
 			}
 			if (!html) {
-				// Last resort: outerHTML via evaluate (survives some navigation races)
 				html = (await page.evaluate(() => document.documentElement?.outerHTML ?? "")) as string;
 			}
 			if (!html) throw new Error("Failed to read page content after navigation settled");
 
 			return {
 				url,
-				finalUrl: page.url(),
+				finalUrl,
 				status: response?.status() ?? 200,
 				html,
 			};
@@ -134,14 +138,14 @@ export async function renderWithCloakBrowser(
 			await context.close().catch(() => {});
 		}
 	} finally {
+		signal.removeEventListener("abort", onAbort);
 		if (browser) {
 			await browser.close().catch(() => {});
 		}
-		openBrowsers = Math.max(0, openBrowsers - 1);
 	}
 }
 
-/** No-op for ephemeral browsers (closed per render). Kept for cleanup hook symmetry. */
+/** Ephemeral browsers are closed per render; hook kept for process-exit symmetry. */
 export async function closeAllBrowsers(): Promise<void> {
-	openBrowsers = 0;
+	// no persistent browser pool
 }

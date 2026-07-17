@@ -1,7 +1,5 @@
 {
   "defaultBackend": "auto",
-  "combine": false,
-  "combineMode": "rotate",
   "compact": false,
   "showStatus": true,
   "numResults": 10,

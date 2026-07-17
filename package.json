@@ -1,15 +1,14 @@
 {
   "name": "pi-custom-search",
   "version": "0.1.0",
-  "description": "Pi extension: multi-backend web_search (brave/serper/tavily/exa/linkup) + local CloakBrowser web_read. No Exa/Jina readers.",
+  "description": "Pi extension: random multi-backend web_search (brave/serper/tavily/exa/linkup) + local CloakBrowser web_read. No Exa/Jina readers.",
   "keywords": [
     "pi-package",
     "pi",
     "pi-coding-agent",
     "web-search",
     "web-read",
-    "cloakbrowser",
-    "rrf"
+    "cloakbrowser"
   ],
   "license": "MIT",
   "type": "module",

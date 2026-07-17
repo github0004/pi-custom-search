@@ -2,7 +2,7 @@
 
 Pi extension with two tools:
 
-- **`web_search`** — search across brave, serper, tavily, exa, and linkup (fallback, round-robin rotate, or RRF combine)
+- **`web_search`** — search across brave, serper, tavily, exa, and linkup (random pick with fallback)
 - **`web_read`** (aliases: `web_fetch`, `web_fetch_and_index`) — fetch a URL locally (undici → fingerprint → CloakBrowser), return clean markdown — **no Exa/Jina readers**
 
 ## Install
@@ -23,24 +23,12 @@ Copy [search.json.example](./search.json.example) to:
 
 Literal API keys only (paste keys inline). Drop any `reader` field from older search-hub configs — extraction is always local.
 
-### Search dispatch (`combine` / `combineMode`)
+### Search dispatch
 
-| Setting | Behavior |
-| ------- | -------- |
-| `combineMode: "rotate"` | **Default in example** — round-robin: each request goes to the next enabled backend (ignores `combine`) |
-| `combine: false` | Try enabled backends in order; first success wins |
-| `combine: true`, `combineMode: "all"` | Query all enabled backends in parallel, merge with RRF |
-| `combine: true`, `combineMode: "targeted"` | Fan out until ~3 usable backends, then RRF |
+Auto mode shuffles **enabled backends that have an `apiKey`**: random primary, then the rest as fallback. Empty results and failures try the next provider; aborts stop immediately. Same behavior in-session and across sessions/processes.
 
-Example — round-robin rotate (recommended for spreading load across keys):
-
-```json
-{
-  "combine": false,
-  "combineMode": "rotate",
-  "backends": { "...": "enabled backends" }
-}
-```
+- Pin with tool param `backend: "brave"` (etc.), or set `defaultBackend` in config.
+- `combine` / `combineMode` from older search-hub configs are ignored.
 
 ### CloakBrowser
 
@@ -58,7 +46,7 @@ Or per call: `web_read({ url, headless: false })`.
 
 | Tool | Params |
 | ---- | ------ |
-| `web_search` | `query`, `numResults`, `backend`, `combine`, `compact` |
+| `web_search` | `query`, `numResults`, `backend`, `compact` |
 | `web_read` | `url`, `mode`, `format`, `onlyMainContent`, `maxChars` / `maxBytes`, `headless`, `savePath`, `saveDir` |
 
 `web_read` `auto` mode escalates: fast HTTP → fingerprint (if blocked) → readability (if sparse) → CloakBrowser (if still thin/SPA).

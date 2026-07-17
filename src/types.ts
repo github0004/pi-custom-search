@@ -41,14 +41,8 @@ export interface ReadConfig {
 }
 
 export interface SearchConfig {
-	defaultBackend?: string;
-	combine?: boolean;
-	/**
-	 * "all" queries every active backend;
-	 * "targeted" stops after ~3 usable sets;
-	 * "rotate" sends each request to the next backend (round-robin; ignores combine).
-	 */
-	combineMode?: "all" | "targeted" | "rotate";
+	/** Tool default when `backend` param omitted. `"auto"` = random shuffle. */
+	defaultBackend?: BackendName | "auto";
 	compact?: boolean;
 	showStatus?: boolean;
 	numResults?: number;
@@ -69,12 +63,7 @@ export interface SearchResult {
 	content?: string;
 }
 
-export interface SearchResultWithBackend extends SearchResult {
-	backend?: string;
-}
-
 export interface BackendRunner {
-	needsKey: boolean;
 	label: string;
 	search: (
 		query: string,
