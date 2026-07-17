@@ -2,10 +2,7 @@
 
 import type { SearchConfig } from "./types.js";
 
-/**
- * Return the trimmed literal apiKey from config, or undefined.
- * No env-var refs, no !shell commands.
- */
+/** Trimmed literal apiKey from config, or undefined. No env / !shell. */
 export function resolveBackendKey(backend: string, config: SearchConfig): string | undefined {
 	const key = config.backends?.[backend as keyof NonNullable<SearchConfig["backends"]>]?.apiKey;
 	if (typeof key !== "string") return undefined;

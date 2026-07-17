@@ -1,5 +1,5 @@
 /**
- * pi-custom-search — web_search (5 backends + RRF) + local web_read (CloakBrowser).
+ * pi-custom-search — web_search (random multi-backend) + local web_read (CloakBrowser).
  *
  * Config: ~/.pi/agent/extensions/search.json + .pi/search.json (project wins)
  * Credentials: literal apiKey only
