@@ -40,6 +40,26 @@ export interface ReadConfig {
 	headless?: boolean;
 }
 
+/** Thresholds for context overload protection (see `src/context-safety.ts`). */
+export interface ContextSafetyConfig {
+	/** Master switch. Default: true */
+	enabled?: boolean;
+	/** Warn after this many search/read calls since last compact. Default: 2 */
+	warnAfter?: number;
+	/** Require pi-context management after this many calls. Default: 3 */
+	manageAfter?: number;
+	/** Soft-block further search/read until management. Default: 5 */
+	blockAfter?: number;
+	/** Warn when context usage % reaches this. Default: 45 */
+	contextPercentWarn?: number;
+	/** Require management when context usage % reaches this. Default: 60 */
+	contextPercentManage?: number;
+	/** Soft-block when context usage % reaches this. Default: 75 */
+	contextPercentBlock?: number;
+	/** Estimated chars of search/read output that trigger management. Default: 20000 */
+	charsManage?: number;
+}
+
 export interface SearchConfig {
 	/** Tool default when `backend` param omitted. `"auto"` = random shuffle. */
 	defaultBackend?: BackendName | "auto";
@@ -47,6 +67,8 @@ export interface SearchConfig {
 	showStatus?: boolean;
 	numResults?: number;
 	read?: ReadConfig;
+	/** Context overload guards; integrates with pi-context when installed. */
+	contextSafety?: ContextSafetyConfig;
 	backends?: {
 		brave?: BackendConfig;
 		serper?: BackendConfig;

@@ -5,7 +5,7 @@ import { fetchUrl, type FetchResult } from "./fetch.js";
 import { fingerprintFetch } from "./fingerprint.js";
 import { renderWithCloakBrowser } from "./browser.js";
 import { extractFast, extractReadable, readableIsBetter } from "./readable.js";
-import { htmlToMarkdown, htmlToText } from "./markdown.js";
+import { htmlToMarkdown, htmlToText, sanitizeForContext } from "./markdown.js";
 
 export interface ReadOptions {
 	mode?: ReadMode;
@@ -111,8 +111,9 @@ function materialize(
 }
 
 function truncate(content: string, maxChars?: number): string {
-	if (!maxChars || maxChars <= 0 || content.length <= maxChars) return content;
-	return content.slice(0, maxChars) + "\n\n…[truncated]";
+	const cleaned = sanitizeForContext(content);
+	if (!maxChars || maxChars <= 0 || cleaned.length <= maxChars) return cleaned;
+	return cleaned.slice(0, maxChars) + "\n\n…[truncated]";
 }
 
 function fromFetch(
