@@ -1,5 +1,6 @@
 /**
  * Ambient type declarations for @earendil-works/pi-coding-agent (optional peer dep).
+ * Subset used by pi-custom-search — not a full SDK mirror.
  */
 
 declare module "@earendil-works/pi-coding-agent" {
@@ -21,10 +22,17 @@ declare module "@earendil-works/pi-coding-agent" {
 		input(label: string, options?: UIInputOptions): Promise<string | undefined>;
 	}
 
+	export interface ContextUsage {
+		tokens: number | null;
+		contextWindow: number;
+		percent: number | null;
+	}
+
 	export interface ExtensionContext {
 		cwd: string;
 		hasUI: boolean;
 		ui: UI;
+		getContextUsage?: () => ContextUsage | undefined;
 	}
 
 	export interface ToolParameter {
@@ -48,9 +56,61 @@ declare module "@earendil-works/pi-coding-agent" {
 		handler: (args: string[], ctx: ExtensionContext) => Promise<void>;
 	}
 
+	export interface ToolResultEvent {
+		type: "tool_result";
+		toolCallId: string;
+		toolName: string;
+		input: Record<string, unknown>;
+		content: Array<{ type: string; text?: string }>;
+		isError: boolean;
+		details?: unknown;
+	}
+
+	export interface ToolResultEventResult {
+		content?: Array<{ type: string; text?: string }>;
+		details?: unknown;
+		isError?: boolean;
+	}
+
+	export interface ToolCallEvent {
+		type: "tool_call";
+		toolName: string;
+		input: Record<string, unknown>;
+	}
+
+	export interface ToolCallEventResult {
+		block?: boolean;
+		reason?: string;
+	}
+
+	export interface SessionStartEvent {
+		type: "session_start";
+		reason?: string;
+	}
+
+	export interface SessionCompactEvent {
+		type: "session_compact";
+	}
+
 	export interface ExtensionAPI {
 		registerTool(config: ToolParameter): void;
 		registerCommand(name: string, config: Command): void;
-		on(event: "session_start", handler: (event: unknown, ctx: ExtensionContext) => void): void;
+		getActiveTools?(): string[];
+		on(event: "session_start", handler: (event: SessionStartEvent, ctx: ExtensionContext) => void): void;
+		on(event: "session_compact", handler: (event: SessionCompactEvent, ctx: ExtensionContext) => void): void;
+		on(
+			event: "tool_call",
+			handler: (
+				event: ToolCallEvent,
+				ctx: ExtensionContext,
+			) => ToolCallEventResult | void | Promise<ToolCallEventResult | void>,
+		): void;
+		on(
+			event: "tool_result",
+			handler: (
+				event: ToolResultEvent,
+				ctx: ExtensionContext,
+			) => ToolResultEventResult | void | Promise<ToolResultEventResult | void>,
+		): void;
 	}
 }

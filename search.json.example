@@ -4,6 +4,17 @@
   "showStatus": true,
   "numResults": 10,
 
+  "contextSafety": {
+    "enabled": true,
+    "warnAfter": 2,
+    "manageAfter": 3,
+    "blockAfter": 5,
+    "contextPercentWarn": 45,
+    "contextPercentManage": 60,
+    "contextPercentBlock": 75,
+    "charsManage": 20000
+  },
+
   "read": {
     "defaultMode": "auto",
     "defaultFormat": "markdown",

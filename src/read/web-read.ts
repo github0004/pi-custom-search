@@ -7,11 +7,17 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 import { config, refreshConfig } from "../config.js";
+import {
+	contextSafetyGuidelines,
+	preflightSafety,
+	recommendedReadMaxChars,
+	recordSearchOp,
+} from "../context-safety.js";
 import { readUrl } from "./pipeline.js";
 import type { ReadFormat, ReadMode } from "../types.js";
 
 /** Cap tool text returned to the model when not saving to disk. */
-const DEFAULT_CONTEXT_MAX_CHARS = 24_000;
+const DEFAULT_CONTEXT_MAX_CHARS = 12_000;
 const SAVE_PREVIEW_CHARS = 400;
 
 function expandHome(path: string): string {
@@ -103,6 +109,13 @@ const webReadParameters = Type.Object({
 				"Supports ~/…. Preferred for multi-page vault scrapes — returns a short summary only.",
 		}),
 	),
+	force: Type.Optional(
+		Type.Boolean({
+			description:
+				"Bypass context-safety soft-block for one critical call. Still applies tighter caps and management footers. Prefer pi-context compact or saveDir instead.",
+			default: false,
+		}),
+	),
 });
 
 async function executeWebRead(
@@ -110,20 +123,41 @@ async function executeWebRead(
 	params: Record<string, any>,
 	signal: AbortSignal,
 	onUpdate: (update: { content: Array<{ type: string; text: string }> }) => void,
-	ctx: { cwd: string; ui: { setStatus: (key: string, status: string) => void } },
+	ctx: {
+		cwd: string;
+		ui: { setStatus: (key: string, status: string) => void };
+		getContextUsage?: () => { percent: number | null } | undefined;
+	},
 ) {
 	refreshConfig(ctx.cwd);
+
+	const preflight = preflightSafety({ kind: "read", ctx });
+	if (preflight.blockMessage && !params.force) {
+		ctx.ui.setStatus("read", "⚠ context-safety: manage first");
+		return {
+			content: [{ type: "text", text: preflight.blockMessage }],
+			details: {
+				blocked: true,
+				safetyLevel: preflight.level,
+				piContextAvailable: preflight.piContextAvailable,
+			},
+		};
+	}
+
 	const readCfg = config.read ?? {};
 	const mode = (params.mode ?? readCfg.defaultMode ?? "auto") as ReadMode;
 	const format = (params.format ?? readCfg.defaultFormat ?? "markdown") as ReadFormat;
 	const onlyMainContent = params.onlyMainContent ?? readCfg.onlyMainContent ?? true;
-	const removeImages = readCfg.removeImages ?? false;
 	const headless = params.headless ?? readCfg.headless ?? true;
 	const savePathRaw = typeof params.savePath === "string" ? params.savePath.trim() : "";
 	const saveDirRaw = typeof params.saveDir === "string" ? params.saveDir.trim() : "";
 	const saving = Boolean(savePathRaw || saveDirRaw);
+	// Default strip images for chat returns — inline/base64 media is the #1 overload vector.
+	const removeImages = saving
+		? (readCfg.removeImages ?? false)
+		: (readCfg.removeImages ?? true);
 
-	const maxChars = saving
+	let maxChars = saving
 		? params.maxChars && params.maxChars > 0
 			? params.maxChars
 			: undefined
@@ -132,6 +166,15 @@ async function executeWebRead(
 			: readCfg.maxChars && readCfg.maxChars > 0
 				? readCfg.maxChars
 				: DEFAULT_CONTEXT_MAX_CHARS;
+
+	// Progressive cap as the search/read burst grows (blocks Reddit-sized second reads).
+	if (!saving && maxChars != null) {
+		maxChars = recommendedReadMaxChars(maxChars);
+		if (preflight.forceCompact) {
+			maxChars = Math.min(maxChars, 5_000);
+		}
+	}
+
 	const maxBytes = params.maxBytes ?? readCfg.maxBytes;
 	const timeoutMs = (readCfg.timeoutSeconds ?? 30) * 1000;
 
@@ -184,8 +227,18 @@ async function executeWebRead(
 				"Preview:",
 				preview + (result.content.length > SAVE_PREVIEW_CHARS ? "…" : ""),
 			].join("\n");
+			const safety = recordSearchOp({
+				kind: "read",
+				resultChars: summary.length,
+				ctx,
+			});
 			return {
-				content: [{ type: "text", text: summary }],
+				content: [
+					{
+						type: "text",
+						text: safety.footer ? `${summary}${safety.footer}` : summary,
+					},
+				],
 				details: {
 					url: result.url,
 					finalUrl: result.finalUrl,
@@ -196,13 +249,25 @@ async function executeWebRead(
 					title: result.title,
 					headless,
 					savePath: abs,
+					safetyLevel: safety.level,
+					piContextAvailable: safety.piContextAvailable,
 				},
 			};
 		}
 
 		setStatus(`📄 ${result.mode}: ${result.chars} chars`);
+		const safety = recordSearchOp({
+			kind: "read",
+			resultChars: fullBody.length,
+			ctx,
+		});
 		return {
-			content: [{ type: "text", text: fullBody }],
+			content: [
+				{
+					type: "text",
+					text: safety.footer ? `${fullBody}${safety.footer}` : fullBody,
+				},
+			],
 			details: {
 				url: result.url,
 				finalUrl: result.finalUrl,
@@ -212,6 +277,8 @@ async function executeWebRead(
 				chars: result.chars,
 				title: result.title,
 				headless,
+				safetyLevel: safety.level,
+				piContextAvailable: safety.piContextAvailable,
 			},
 		};
 	} catch (err) {
@@ -227,6 +294,7 @@ const sharedGuidelines = [
 	"saveDir=~/vault/foo writes ~/vault/foo/<title-slug>.md and returns a short summary only",
 	"Use mode=browser when the user asks for CloakBrowser; otherwise prefer mode=auto",
 	"Prefer format=markdown; avoid format=html unless savePath/saveDir is set",
+	...contextSafetyGuidelines(),
 ];
 
 /**

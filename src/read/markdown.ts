@@ -71,17 +71,49 @@ function stripLargeElements(html: string): string {
 	return result;
 }
 
+/** Drop inline data:/blob: images from HTML before turndown (Reddit/JS challenge pages). */
+export function stripInlineMediaFromHtml(html: string): string {
+	return html
+		.replace(/<img\b[^>]*\bsrc=["']data:[^"']*["'][^>]*>/giu, "")
+		.replace(/<img\b[^>]*\bsrc=["']blob:[^"']*["'][^>]*>/giu, "")
+		.replace(/\bsrc=["']data:[^"']{200,}["']/giu, 'src=""')
+		.replace(/\bhref=["']data:[^"']{200,}["']/giu, 'href=""');
+}
+
+/**
+ * Sanitize extracted text/markdown before it enters the model context.
+ * Strips data-URI embeds and long base64 blobs that blow up token counts.
+ */
+export function sanitizeForContext(text: string): string {
+	let out = text;
+	// Markdown image embeds with data: or blob:
+	out = out.replace(/!\[[\s\S]*?]\(\s*data:[\s\S]*?\)/gi, "[inline image omitted]");
+	out = out.replace(/!\[[\s\S]*?]\(\s*blob:[\s\S]*?\)/gi, "[inline image omitted]");
+	out = out.replace(/<img\b[^>]*\bsrc=["']data:[\s\S]*?["'][^>]*>/gi, "");
+	// Bare data: URLs (including truncated challenge pages)
+	out = out.replace(
+		/\bdata:(?:image|application|font|audio|video)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{80,}/gi,
+		"[base64 omitted]",
+	);
+	// Long base64 payloads without a data: prefix (must include +/ to avoid URLs)
+	out = out.replace(/\b(?=[A-Za-z0-9+/]*[+/])[A-Za-z0-9+/]{200,}={0,2}\b/g, "[base64 omitted]");
+	return out;
+}
+
 export function htmlToMarkdown(html: string, options: MarkdownOptions = {}): string {
 	const service = options.removeImages ? removeImagesService : keepImagesService;
-	return normalizeWhitespace(service.turndown(stripLargeElements(html)));
+	const cleaned = stripInlineMediaFromHtml(stripLargeElements(html));
+	return sanitizeForContext(normalizeWhitespace(service.turndown(cleaned)));
 }
 
 /** Strip tags for plain text fallback. */
 export function htmlToText(html: string): string {
-	return normalizeWhitespace(
-		html
-			.replace(/<script[\s\S]*?<\/script>/giu, " ")
-			.replace(/<style[\s\S]*?<\/style>/giu, " ")
-			.replace(/<[^>]+>/gu, " "),
+	return sanitizeForContext(
+		normalizeWhitespace(
+			html
+				.replace(/<script[\s\S]*?<\/script>/giu, " ")
+				.replace(/<style[\s\S]*?<\/style>/giu, " ")
+				.replace(/<[^>]+>/gu, " "),
+		),
 	);
 }
