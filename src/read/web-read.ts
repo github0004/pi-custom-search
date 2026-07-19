@@ -13,11 +13,19 @@ import {
 	recommendedReadMaxChars,
 	recordSearchOp,
 } from "../context-safety.js";
+import { pageOutline, selectExcerpts } from "./excerpts.js";
 import { readUrl } from "./pipeline.js";
-import type { ReadFormat, ReadMode } from "../types.js";
+import type { ReadFormat, ReadMode, ReadReturnMode } from "../types.js";
 
-/** Cap tool text returned to the model when not saving to disk. */
+/** Cap tool text returned to the model when return=full and not saving. */
 const DEFAULT_CONTEXT_MAX_CHARS = 12_000;
+/** Default char budget for ranked excerpts. */
+const DEFAULT_EXCERPT_MAX_CHARS = 6_000;
+/**
+ * Internal materialize budget when ranking excerpts so mid/late page sections
+ * are still available to score (not blind head-truncated).
+ */
+const EXCERPT_SOURCE_MAX_CHARS = 100_000;
 const SAVE_PREVIEW_CHARS = 400;
 
 function expandHome(path: string): string {
@@ -55,6 +63,20 @@ const webReadParameters = Type.Object({
 	url: Type.String({
 		description: "URL to fetch / open / read",
 	}),
+	query: Type.Optional(
+		Type.String({
+			description:
+				"What you need from the page (keywords / focus). Used to rank excerpts when return=excerpts (default). " +
+				"Strongly preferred for every chat read.",
+		}),
+	),
+	return: Type.Optional(
+		StringEnum(["excerpts", "full"] as const, {
+			description:
+				"Chat return shape. excerpts (default): ranked chunks vs query, or page outline if query omitted. " +
+				"full: entire main-content body (subject to maxChars caps). Ignored when savePath/saveDir is set.",
+		}),
+	),
 	mode: Type.Optional(
 		StringEnum(["auto", "fast", "fingerprint", "readable", "browser"] as const, {
 			description:
@@ -78,7 +100,8 @@ const webReadParameters = Type.Object({
 		Type.Number({
 			description:
 				"Truncate extracted body (0/omit = no limit on saved files). " +
-				"Without savePath/saveDir, chat return is still capped at ~24k chars.",
+				"With return=full and no save target, chat return is still capped (~12k). " +
+				"With return=excerpts, caps the excerpt budget (~6k default).",
 		}),
 	),
 	maxBytes: Type.Optional(
@@ -152,26 +175,49 @@ async function executeWebRead(
 	const savePathRaw = typeof params.savePath === "string" ? params.savePath.trim() : "";
 	const saveDirRaw = typeof params.saveDir === "string" ? params.saveDir.trim() : "";
 	const saving = Boolean(savePathRaw || saveDirRaw);
+	const query = typeof params.query === "string" ? params.query.trim() : "";
+	const returnMode = (
+		saving
+			? "full"
+			: ((params.return as string | undefined) ?? readCfg.defaultReturn ?? "excerpts")
+	) as ReadReturnMode;
+	const wantExcerpts = !saving && returnMode === "excerpts";
 	// Default strip images for chat returns — inline/base64 media is the #1 overload vector.
 	const removeImages = saving
 		? (readCfg.removeImages ?? false)
 		: (readCfg.removeImages ?? true);
 
-	let maxChars = saving
-		? params.maxChars && params.maxChars > 0
-			? params.maxChars
-			: undefined
-		: params.maxChars && params.maxChars > 0
-			? params.maxChars
-			: readCfg.maxChars && readCfg.maxChars > 0
-				? readCfg.maxChars
-				: DEFAULT_CONTEXT_MAX_CHARS;
-
-	// Progressive cap as the search/read burst grows (blocks Reddit-sized second reads).
-	if (!saving && maxChars != null) {
-		maxChars = recommendedReadMaxChars(maxChars);
+	let maxChars: number | undefined;
+	if (saving) {
+		maxChars =
+			params.maxChars && params.maxChars > 0 ? params.maxChars : undefined;
+	} else if (wantExcerpts) {
+		// Fetch a large source body for ranking; chat budget applied after selectExcerpts.
+		maxChars = EXCERPT_SOURCE_MAX_CHARS;
+	} else {
+		const chatMax: number =
+			typeof params.maxChars === "number" && params.maxChars > 0
+				? params.maxChars
+				: readCfg.maxChars && readCfg.maxChars > 0
+					? readCfg.maxChars
+					: DEFAULT_CONTEXT_MAX_CHARS;
+		maxChars = recommendedReadMaxChars(chatMax);
 		if (preflight.forceCompact) {
 			maxChars = Math.min(maxChars, 5_000);
+		}
+	}
+
+	let excerptBudget = DEFAULT_EXCERPT_MAX_CHARS;
+	if (wantExcerpts) {
+		excerptBudget =
+			params.maxChars && params.maxChars > 0
+				? params.maxChars
+				: readCfg.excerptMaxChars && readCfg.excerptMaxChars > 0
+					? readCfg.excerptMaxChars
+					: DEFAULT_EXCERPT_MAX_CHARS;
+		excerptBudget = recommendedReadMaxChars(excerptBudget);
+		if (preflight.forceCompact) {
+			excerptBudget = Math.min(excerptBudget, 5_000);
 		}
 	}
 
@@ -197,16 +243,16 @@ async function executeWebRead(
 			signal,
 		});
 
-		const header = [
+		const headerLines = [
 			`# ${result.title || "Untitled"}`,
 			`URL: ${result.finalUrl}`,
 			`Mode: ${result.mode} · Format: ${result.format} · Status: ${result.status}` +
 				(result.mode.includes("browser") ? ` · Headless: ${headless}` : ""),
-			"",
-		].join("\n");
-		const fullBody = `${header}${result.content}`;
+		];
 
 		if (saving) {
+			const header = [...headerLines, ""].join("\n");
+			const fullBody = `${header}${result.content}`;
 			let abs: string;
 			if (savePathRaw) {
 				abs = resolveUserPath(savePathRaw, ctx.cwd);
@@ -249,13 +295,48 @@ async function executeWebRead(
 					title: result.title,
 					headless,
 					savePath: abs,
+					return: "full",
 					safetyLevel: safety.level,
 					piContextAvailable: safety.piContextAvailable,
 				},
 			};
 		}
 
-		setStatus(`📄 ${result.mode}: ${result.chars} chars`);
+		let body: string;
+		let returnDetail: ReadReturnMode = returnMode;
+		let matched: number | undefined;
+		let totalChunks: number | undefined;
+		let pageChars: number | undefined;
+
+		if (wantExcerpts) {
+			headerLines.push(
+				`Return: excerpts` + (query ? ` · query: ${JSON.stringify(query)}` : ""),
+			);
+			headerLines.push("");
+			if (query) {
+				const selected = selectExcerpts(result.content, query, {
+					maxChars: excerptBudget,
+				});
+				body = selected.text;
+				matched = selected.matched;
+				totalChunks = selected.totalChunks;
+				pageChars = selected.pageChars;
+				setStatus(
+					`📄 ${result.mode}: ${matched}/${totalChunks} excerpts (~${body.length} chars)`,
+				);
+			} else {
+				body = pageOutline(result.content, Math.min(800, excerptBudget));
+				pageChars = result.content.length;
+				setStatus(`📄 ${result.mode}: outline (~${body.length} chars)`);
+			}
+			returnDetail = "excerpts";
+		} else {
+			headerLines.push(`Return: full`, "");
+			body = result.content;
+			setStatus(`📄 ${result.mode}: ${result.chars} chars`);
+		}
+
+		const fullBody = `${headerLines.join("\n")}${body}`;
 		const safety = recordSearchOp({
 			kind: "read",
 			resultChars: fullBody.length,
@@ -274,9 +355,14 @@ async function executeWebRead(
 				mode: result.mode,
 				format: result.format,
 				status: result.status,
-				chars: result.chars,
+				chars: fullBody.length,
 				title: result.title,
 				headless,
+				return: returnDetail,
+				query: query || undefined,
+				matched,
+				totalChunks,
+				pageChars,
 				safetyLevel: safety.level,
 				piContextAvailable: safety.piContextAvailable,
 			},
@@ -290,6 +376,8 @@ async function executeWebRead(
 const sharedGuidelines = [
 	"When the user pastes a URL or asks to check/open/verify a link, forum post, or docs page — call web_read (or web_fetch)",
 	"Do NOT invent tools like web_fetch_and_index — use web_read / web_fetch for page content",
+	"By default web_read returns ranked excerpts: ALWAYS pass query describing what you need from the page",
+	"Use return=full only when the task needs the whole page or you cannot narrow focus",
 	"When saving pages to a vault/folder or scraping many URLs, ALWAYS set saveDir or savePath — never load full bodies into chat",
 	"saveDir=~/vault/foo writes ~/vault/foo/<title-slug>.md and returns a short summary only",
 	"Use mode=browser when the user asks for CloakBrowser; otherwise prefer mode=auto",
@@ -308,10 +396,12 @@ export function registerWebRead(pi: ExtensionAPI): void {
 		description:
 			"PRIMARY tool for any URL the user pastes or asks you to open/check/verify " +
 			"(forum posts, docs, KB articles, PowerShell snippets on a page, etc.). " +
-			"Fetches the page as clean markdown (HTTP → fingerprint → CloakBrowser). " +
-			"For vault/multi-page scrapes set savePath or saveDir (summary only returned). " +
-			"Chat output capped ~24k chars without a save target. Never calls Exa/Jina.",
-		promptSnippet: "Open/fetch/read any URL (forum, docs, KB) as markdown",
+			"Fetches locally (HTTP → fingerprint → CloakBrowser). " +
+			"DEFAULT chat return is query-ranked excerpts — pass query with what you need. " +
+			"Use return=full for the complete main-content body, or savePath/saveDir for vault writes (full file, summary only in chat). " +
+			"Never calls Exa/Jina.",
+		promptSnippet:
+			"Open/fetch/read a URL; pass query for ranked excerpts (default) or return=full",
 		promptGuidelines: sharedGuidelines,
 		parameters: webReadParameters,
 		execute: executeWebRead,
@@ -322,8 +412,8 @@ export function registerWebRead(pi: ExtensionAPI): void {
 		name: "web_fetch",
 		label: "Fetch Web Page",
 		description:
-			"Alias of web_read — fetch/open a URL as clean markdown. " +
-			"Use when you want to fetch page content. Prefer the name web_read if both are available.",
+			"Alias of web_read — fetch/open a URL. Default: ranked excerpts (pass query). " +
+			"Use return=full for the whole page. Prefer the name web_read if both are available.",
 		promptSnippet: "Fetch a URL (alias of web_read)",
 		promptGuidelines: sharedGuidelines,
 		parameters: webReadParameters,
@@ -335,7 +425,7 @@ export function registerWebRead(pi: ExtensionAPI): void {
 		name: "web_fetch_and_index",
 		label: "Fetch Web Page",
 		description:
-			"Alias of web_read — fetches URL content as markdown. " +
+			"Alias of web_read — fetches URL content. Default: ranked excerpts (pass query). " +
 			"Does not maintain a separate search index; content is returned (or saved via savePath/saveDir) the same as web_read. " +
 			"Prefer calling web_read directly.",
 		promptSnippet: "Fetch a URL (alias of web_read; no separate index)",

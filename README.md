@@ -3,7 +3,7 @@
 Pi extension with two tools:
 
 - **`web_search`** — search across brave, serper, tavily, exa, and linkup (random pick with fallback)
-- **`web_read`** (aliases: `web_fetch`, `web_fetch_and_index`) — fetch a URL locally (undici → fingerprint → CloakBrowser), return clean markdown — **no Exa/Jina readers**
+- **`web_read`** (aliases: `web_fetch`, `web_fetch_and_index`) — fetch a URL locally (undici → fingerprint → CloakBrowser), return **query-ranked excerpts by default** (or full page / vault save) — **no Exa/Jina readers**
 
 ## Install
 
@@ -47,9 +47,22 @@ Or per call: `web_read({ url, headless: false })`.
 | Tool | Params |
 | ---- | ------ |
 | `web_search` | `query`, `numResults`, `backend`, `compact`, `force` |
-| `web_read` | `url`, `mode`, `format`, `onlyMainContent`, `maxChars` / `maxBytes`, `headless`, `savePath`, `saveDir`, `force` |
+| `web_read` | `url`, `query`, `return`, `mode`, `format`, `onlyMainContent`, `maxChars` / `maxBytes`, `headless`, `savePath`, `saveDir`, `force` |
 
 `web_read` `auto` mode escalates: fast HTTP → fingerprint (if blocked) → readability (if sparse) → CloakBrowser (if still thin/SPA).
+
+### Chat returns (excerpts by default)
+
+By default, chat gets **ranked excerpts**, not the whole page:
+
+```text
+web_read({ url, query: "fortinet multicast igmp snooping" })
+```
+
+- Pass `query` with what you need — local keyword/heading scoring picks relevant sections.
+- Omit `query` → page outline (headings + short lead) and a nudge to focus or request full.
+- `return: "full"` → entire main-content markdown (still subject to char caps).
+- CloakBrowser / HTTP still acquire the full page; ranking happens after markdown extraction.
 
 **Multi-page / vault scrapes:** set `saveDir` (or `savePath`). Full content goes to disk; the model only gets a short summary — prevents context overflow.
 
