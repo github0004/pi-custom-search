@@ -1,7 +1,7 @@
 {
   "name": "pi-custom-search",
-  "version": "1.1.0",
-  "description": "Pi extension: random multi-backend web_search (brave/serper/tavily/exa/linkup) + local CloakBrowser web_read, with pi-context overload safety. No Exa/Jina readers.",
+  "version": "1.2.0",
+  "description": "Pi extension: random multi-backend web_search (brave/serper/tavily/exa/linkup) + local CloakBrowser web_read with query-ranked excerpts and pi-context overload safety. No Exa/Jina readers.",
   "keywords": [
     "pi-package",
     "pi",
