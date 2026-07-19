@@ -23,13 +23,19 @@ export interface BackendConfig {
 
 export type ReadMode = "auto" | "fast" | "fingerprint" | "readable" | "browser";
 export type ReadFormat = "markdown" | "text" | "html";
+/** Chat return shape: ranked excerpts (default) or full main-content body. */
+export type ReadReturnMode = "excerpts" | "full";
 
 export interface ReadConfig {
 	defaultMode?: ReadMode;
 	defaultFormat?: ReadFormat;
+	/** Chat default when not saving. Default: excerpts. */
+	defaultReturn?: ReadReturnMode;
 	onlyMainContent?: boolean;
 	removeImages?: boolean;
 	maxChars?: number;
+	/** Char budget for excerpt chat returns. Default: 6000. */
+	excerptMaxChars?: number;
 	/** Max download size in bytes (floored at 2MB; default 5MB). */
 	maxBytes?: number;
 	timeoutSeconds?: number;

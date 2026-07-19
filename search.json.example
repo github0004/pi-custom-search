@@ -18,9 +18,11 @@
   "read": {
     "defaultMode": "auto",
     "defaultFormat": "markdown",
+    "defaultReturn": "excerpts",
     "onlyMainContent": true,
     "removeImages": false,
     "maxChars": 0,
+    "excerptMaxChars": 6000,
     "timeoutSeconds": 30,
     "headless": true
   },

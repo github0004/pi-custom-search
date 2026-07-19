@@ -12,6 +12,11 @@ export interface ReadOptions {
 	format?: ReadFormat;
 	onlyMainContent?: boolean;
 	removeImages?: boolean;
+	/**
+	 * Truncate materialized body. Omit / 0 = no truncate.
+	 * For excerpt ranking, callers pass a large budget (e.g. 100k) so mid-page
+	 * sections remain available before web_read selects query-ranked chunks.
+	 */
 	maxChars?: number;
 	maxBytes?: number;
 	timeoutMs?: number;
