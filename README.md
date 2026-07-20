@@ -46,8 +46,8 @@ Or per call: `web_read({ url, headless: false })`.
 
 | Tool | Params |
 | ---- | ------ |
-| `web_search` | `query`, `numResults`, `backend`, `compact`, `force` |
-| `web_read` | `url`, `query`, `return`, `mode`, `format`, `onlyMainContent`, `maxChars` / `maxBytes`, `headless`, `savePath`, `saveDir`, `force` |
+| `web_search` | `query`, `numResults`, `backend`, `compact` |
+| `web_read` | `url`, `query`, `return`, `mode`, `format`, `onlyMainContent`, `maxChars` / `maxBytes`, `headless`, `savePath`, `saveDir` |
 
 `web_read` `auto` mode escalates: fast HTTP → fingerprint (if blocked) → readability (if sparse) → CloakBrowser (if still thin/SPA).
 
@@ -69,21 +69,3 @@ web_read({ url, query: "fortinet multicast igmp snooping" })
 ```text
 web_read({ url, mode: "browser", saveDir: "~/vault/fortinet-multicast" })
 ```
-
-## Context safety (pi-context)
-
-Search/read bursts can fill the context window (e.g. stacked searches + a browser-read that embeds base64 images). This package detects whether [pi-context](https://pi.dev/packages/pi-context) is installed and steers the agent to manage history between searches:
-
-1. **Detect** — active `context_*` tools, `settings.json` packages, or `~/.pi/agent/npm/node_modules/pi-context`
-2. **Sanitize** — strip `data:` / base64 image payloads from `web_read` output; default `removeImages` for chat returns; progressive char caps as the burst grows
-3. **Warn / manage** — after a few `web_*` ops (or high context % / char budget), append a `[context-safety]` footer for `context_checkpoint` → `context_timeline` → `context_compact`
-4. **Soft-block** — when thresholds are exceeded, further `web_*` calls return a block message until a successful `context_compact` (counters also reset on Pi's built-in session compact)
-5. **Fallback** — without pi-context, force compact search formatting and tighter read caps, and recommend installing it
-
-Install the companion package:
-
-```bash
-pi install npm:pi-context
-```
-
-Tune thresholds in `search.json` under `contextSafety` (see [search.json.example](./search.json.example)). Set `"enabled": false` to disable.

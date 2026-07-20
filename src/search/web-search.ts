@@ -6,11 +6,6 @@ import { Type } from "typebox";
 
 import type { BackendName } from "../types.js";
 import { config, refreshConfig, getActiveBackends } from "../config.js";
-import {
-	contextSafetyGuidelines,
-	preflightSafety,
-	recordSearchOp,
-} from "../context-safety.js";
 import { BACKEND_DEFS, runBackend } from "./backends/registry.js";
 import { formatResults, formatResultsCompact } from "./formatters.js";
 
@@ -32,10 +27,6 @@ function isAbortError(err: unknown): boolean {
 	);
 }
 
-function withFooter(text: string, footer?: string): string {
-	return footer ? `${text}${footer}` : text;
-}
-
 export function registerWebSearch(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "web_search",
@@ -43,14 +34,13 @@ export function registerWebSearch(pi: ExtensionAPI): void {
 		description:
 			"Search the web using brave, serper, tavily, exa, and/or linkup. " +
 			"Auto mode picks a random enabled backend (with shuffled fallback on failure). " +
-			"Use for fact-finding, research, documentation lookups, and current events. " +
-			"For multi-query research, manage context with pi-context (checkpoint → search → compact) so results do not overflow the window.",
+			"Use for fact-finding, research, documentation lookups, and current events.",
 		promptSnippet: "Search the web (brave / serper / tavily / exa / linkup)",
 		promptGuidelines: [
 			"Use web_search when you need up-to-date information, facts, or documentation from the web",
 			"Auto mode picks a random enabled backend; on failure it tries the others in random order",
 			"Configure backends in ~/.pi/agent/extensions/search.json or .pi/search.json",
-			...contextSafetyGuidelines(),
+			"Prefer compact=true while exploring and keep numResults modest to avoid flooding context",
 		],
 		parameters: Type.Object({
 			query: Type.String({
@@ -75,60 +65,24 @@ export function registerWebSearch(pi: ExtensionAPI): void {
 					default: false,
 				}),
 			),
-			force: Type.Optional(
-				Type.Boolean({
-					description:
-						"Bypass context-safety soft-block for one critical call. Still applies compact caps and management footers. Prefer pi-context compact instead.",
-					default: false,
-				}),
-			),
 		}),
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			refreshConfig(ctx.cwd);
 
-			const preflight = preflightSafety({ kind: "search", ctx });
-			if (preflight.blockMessage && !params.force) {
-				ctx.ui.setStatus("search", "⚠ context-safety: manage first");
-				return {
-					content: [{ type: "text", text: preflight.blockMessage }],
-					details: {
-						blocked: true,
-						safetyLevel: preflight.level,
-						piContextAvailable: preflight.piContextAvailable,
-					},
-				};
-			}
-
 			const defaultNum = config.numResults ?? 10;
-			let numResults = Math.max(1, Math.min(params.numResults ?? defaultNum, 20));
-			if (preflight.maxResultsCap != null) {
-				numResults = Math.min(numResults, preflight.maxResultsCap);
-			}
+			const numResults = Math.max(1, Math.min(params.numResults ?? defaultNum, 20));
 			const requestedBackend = params.backend || config.defaultBackend || "auto";
-			const compact =
-				Boolean(params.compact ?? config.compact) || preflight.forceCompact;
+			const compact = Boolean(params.compact ?? config.compact);
 
 			const setStatus = (status: string) => {
 				ctx.ui.setStatus("search", status);
 				onUpdate?.({ content: [{ type: "text", text: `*${status}*` }] });
 			};
 
-			const finish = (text: string, details: Record<string, unknown>) => {
-				const safety = recordSearchOp({
-					kind: "search",
-					resultChars: text.length,
-					ctx,
-				});
-				return {
-					content: [{ type: "text", text: withFooter(text, safety.footer) }],
-					details: {
-						...details,
-						safetyLevel: safety.level,
-						piContextAvailable: safety.piContextAvailable,
-						forcedCompact: compact && (params.compact ?? config.compact) !== true,
-					},
-				};
-			};
+			const finish = (text: string, details: Record<string, unknown>) => ({
+				content: [{ type: "text", text }],
+				details,
+			});
 
 			if (requestedBackend !== "auto") {
 				const pinned = requestedBackend as BackendName;

@@ -7,12 +7,6 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 import { config, refreshConfig } from "../config.js";
-import {
-	contextSafetyGuidelines,
-	preflightSafety,
-	recommendedReadMaxChars,
-	recordSearchOp,
-} from "../context-safety.js";
 import { pageOutline, selectExcerpts } from "./excerpts.js";
 import { readUrl } from "./pipeline.js";
 import type { ReadFormat, ReadMode, ReadReturnMode } from "../types.js";
@@ -132,13 +126,6 @@ const webReadParameters = Type.Object({
 				"Supports ~/…. Preferred for multi-page vault scrapes — returns a short summary only.",
 		}),
 	),
-	force: Type.Optional(
-		Type.Boolean({
-			description:
-				"Bypass context-safety soft-block for one critical call. Still applies tighter caps and management footers. Prefer pi-context compact or saveDir instead.",
-			default: false,
-		}),
-	),
 });
 
 async function executeWebRead(
@@ -149,23 +136,9 @@ async function executeWebRead(
 	ctx: {
 		cwd: string;
 		ui: { setStatus: (key: string, status: string) => void };
-		getContextUsage?: () => { percent: number | null } | undefined;
 	},
 ) {
 	refreshConfig(ctx.cwd);
-
-	const preflight = preflightSafety({ kind: "read", ctx });
-	if (preflight.blockMessage && !params.force) {
-		ctx.ui.setStatus("read", "⚠ context-safety: manage first");
-		return {
-			content: [{ type: "text", text: preflight.blockMessage }],
-			details: {
-				blocked: true,
-				safetyLevel: preflight.level,
-				piContextAvailable: preflight.piContextAvailable,
-			},
-		};
-	}
 
 	const readCfg = config.read ?? {};
 	const mode = (params.mode ?? readCfg.defaultMode ?? "auto") as ReadMode;
@@ -195,16 +168,12 @@ async function executeWebRead(
 		// Fetch a large source body for ranking; chat budget applied after selectExcerpts.
 		maxChars = EXCERPT_SOURCE_MAX_CHARS;
 	} else {
-		const chatMax: number =
+		maxChars =
 			typeof params.maxChars === "number" && params.maxChars > 0
 				? params.maxChars
 				: readCfg.maxChars && readCfg.maxChars > 0
 					? readCfg.maxChars
 					: DEFAULT_CONTEXT_MAX_CHARS;
-		maxChars = recommendedReadMaxChars(chatMax);
-		if (preflight.forceCompact) {
-			maxChars = Math.min(maxChars, 5_000);
-		}
 	}
 
 	let excerptBudget = DEFAULT_EXCERPT_MAX_CHARS;
@@ -215,10 +184,6 @@ async function executeWebRead(
 				: readCfg.excerptMaxChars && readCfg.excerptMaxChars > 0
 					? readCfg.excerptMaxChars
 					: DEFAULT_EXCERPT_MAX_CHARS;
-		excerptBudget = recommendedReadMaxChars(excerptBudget);
-		if (preflight.forceCompact) {
-			excerptBudget = Math.min(excerptBudget, 5_000);
-		}
 	}
 
 	const maxBytes = params.maxBytes ?? readCfg.maxBytes;
@@ -273,18 +238,8 @@ async function executeWebRead(
 				"Preview:",
 				preview + (result.content.length > SAVE_PREVIEW_CHARS ? "…" : ""),
 			].join("\n");
-			const safety = recordSearchOp({
-				kind: "read",
-				resultChars: summary.length,
-				ctx,
-			});
 			return {
-				content: [
-					{
-						type: "text",
-						text: safety.footer ? `${summary}${safety.footer}` : summary,
-					},
-				],
+				content: [{ type: "text", text: summary }],
 				details: {
 					url: result.url,
 					finalUrl: result.finalUrl,
@@ -296,8 +251,6 @@ async function executeWebRead(
 					headless,
 					savePath: abs,
 					return: "full",
-					safetyLevel: safety.level,
-					piContextAvailable: safety.piContextAvailable,
 				},
 			};
 		}
@@ -337,18 +290,8 @@ async function executeWebRead(
 		}
 
 		const fullBody = `${headerLines.join("\n")}${body}`;
-		const safety = recordSearchOp({
-			kind: "read",
-			resultChars: fullBody.length,
-			ctx,
-		});
 		return {
-			content: [
-				{
-					type: "text",
-					text: safety.footer ? `${fullBody}${safety.footer}` : fullBody,
-				},
-			],
+			content: [{ type: "text", text: fullBody }],
 			details: {
 				url: result.url,
 				finalUrl: result.finalUrl,
@@ -363,8 +306,6 @@ async function executeWebRead(
 				matched,
 				totalChunks,
 				pageChars,
-				safetyLevel: safety.level,
-				piContextAvailable: safety.piContextAvailable,
 			},
 		};
 	} catch (err) {
@@ -382,7 +323,6 @@ const sharedGuidelines = [
 	"saveDir=~/vault/foo writes ~/vault/foo/<title-slug>.md and returns a short summary only",
 	"Use mode=browser when the user asks for CloakBrowser; otherwise prefer mode=auto",
 	"Prefer format=markdown; avoid format=html unless savePath/saveDir is set",
-	...contextSafetyGuidelines(),
 ];
 
 /**
